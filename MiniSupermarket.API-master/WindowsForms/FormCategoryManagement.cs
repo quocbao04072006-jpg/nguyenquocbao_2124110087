@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -10,24 +11,38 @@ namespace MiniSupermarket.WinForms
 {
     public partial class FormCategoryManagement : Form
     {
-
-        // Sử dụng địa chỉ http://localhost:5080/api/ đúng theo file .http của bạn
-        private static readonly HttpClient _client = new HttpClient(new HttpClientHandler
-        {
-            // Bỏ qua kiểm tra chứng chỉ SSL nếu chạy HTTPS local
-            ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
-        })
-        {
-            BaseAddress = new Uri("http://localhost:5159/api/")
-        };
-
         public FormCategoryManagement()
         {
             InitializeComponent();
             AutoLayoutControls(); // Tự động căn chỉnh lại toàn bộ vị trí & kích thước giao diện
         }
 
-        // --- HÀM CĂN CHỈNH GIAO DIỆN BẰNG CODE ---
+        // Bổ sung phương thức cấu hình HttpClient có gắn kèm Token bảo mật
+
+        private HttpClient GetAuthenticatedClient()
+        {
+            var handler = new HttpClientHandler
+            {
+                // Bỏ qua kiểm tra chứng chỉ SSL khi chạy HTTPS trên localhost
+                ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
+            };
+
+            var client = new HttpClient(handler)
+            {
+                // Kiểm tra lại Port (7198 hoặc 7123) cho khớp với Backend API
+                BaseAddress = new Uri("https://localhost:7198/api/")
+            };
+
+            // Đính kèm Token vào Header theo chuẩn Bearer Authentication
+            if (!string.IsNullOrEmpty(SessionManager.JwtToken))
+            {
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", SessionManager.JwtToken);
+            }
+
+            return client;
+        }
+
+        // Ví dụ áp dụng khi gọi hàm tải dữ liệu LoadDataAsync():
         private void AutoLayoutControls()
         {
             // 1. Cấu hình Form chính
@@ -50,7 +65,6 @@ namespace MiniSupermarket.WinForms
 
             txtKeyword.Location = new Point(15, 25);
             txtKeyword.Size = new Size(270, 23);
-
 
             btnSearch.Text = "Tìm kiếm";
             btnSearch.Location = new Point(295, 23);
@@ -78,6 +92,7 @@ namespace MiniSupermarket.WinForms
             dgvCategories.AllowUserToAddRows = false;
 
             gbList.Controls.Add(dgvCategories);
+
             // 4. GroupBox Thông tin Nhóm hàng (Bên phải)
             GroupBox gbInfo = new GroupBox
             {
@@ -157,12 +172,15 @@ namespace MiniSupermarket.WinForms
         {
             try
             {
-                var categories = await _client.GetFromJsonAsync<List<CategoryDto>>("categories");
-                dgvCategories.DataSource = categories;
+                using (var client = GetAuthenticatedClient())
+                {
+                    var categories = await client.GetFromJsonAsync<List<CategoryDto>>("categories");
+                    dgvCategories.DataSource = categories;
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Lỗi kết nối Server: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Lỗi quyền truy cập hoặc mất kết nối: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -199,16 +217,19 @@ namespace MiniSupermarket.WinForms
 
             try
             {
-                var response = await _client.PostAsJsonAsync("categories", newCat);
-                if (response.IsSuccessStatusCode)
+                using (var client = GetAuthenticatedClient())
                 {
-                    MessageBox.Show("Thêm mới thành công!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    await LoadDataAsync();
-                    ClearInputs();
-                }
-                else
-                {
-                    MessageBox.Show($"Thêm mới thất bại! Mã lỗi: {response.StatusCode}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    var response = await client.PostAsJsonAsync("categories", newCat);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        MessageBox.Show("Thêm mới thành công!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        await LoadDataAsync();
+                        ClearInputs();
+                    }
+                    else
+                    {
+                        MessageBox.Show($"Thêm mới thất bại! Mã lỗi: {response.StatusCode}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 }
             }
             catch (Exception ex)
@@ -240,16 +261,19 @@ namespace MiniSupermarket.WinForms
 
             try
             {
-                var response = await _client.PutAsJsonAsync($"categories/{id}", updateCat);
-                if (response.IsSuccessStatusCode)
+                using (var client = GetAuthenticatedClient())
                 {
-                    MessageBox.Show("Cập nhật thành công!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    await LoadDataAsync();
-                    ClearInputs();
-                }
-                else
-                {
-                    MessageBox.Show($"Cập nhật thất bại! Mã lỗi: {response.StatusCode}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    var response = await client.PutAsJsonAsync($"categories/{id}", updateCat);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        MessageBox.Show("Cập nhật thành công!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        await LoadDataAsync();
+                        ClearInputs();
+                    }
+                    else
+                    {
+                        MessageBox.Show($"Cập nhật thất bại! Mã lỗi: {response.StatusCode}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 }
             }
             catch (Exception ex)
@@ -271,16 +295,19 @@ namespace MiniSupermarket.WinForms
             {
                 try
                 {
-                    var response = await _client.DeleteAsync($"categories/{id}");
-                    if (response.IsSuccessStatusCode)
+                    using (var client = GetAuthenticatedClient())
                     {
-                        MessageBox.Show("Xóa thành công!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        await LoadDataAsync();
-                        ClearInputs();
-                    }
-                    else
-                    {
-                        MessageBox.Show($"Xóa thất bại! Mã lỗi: {response.StatusCode}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        var response = await client.DeleteAsync($"categories/{id}");
+                        if (response.IsSuccessStatusCode)
+                        {
+                            MessageBox.Show("Xóa thành công!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            await LoadDataAsync();
+                            ClearInputs();
+                        }
+                        else
+                        {
+                            MessageBox.Show($"Xóa thất bại! Mã lỗi: {response.StatusCode}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -301,9 +328,12 @@ namespace MiniSupermarket.WinForms
 
             try
             {
-                string encodedKeyword = Uri.EscapeDataString(keyword);
-                var result = await _client.GetFromJsonAsync<List<CategoryDto>>($"categories/search?keyword={encodedKeyword}");
-                dgvCategories.DataSource = result;
+                using (var client = GetAuthenticatedClient())
+                {
+                    string encodedKeyword = Uri.EscapeDataString(keyword);
+                    var result = await client.GetFromJsonAsync<List<CategoryDto>>($"categories/search?keyword={encodedKeyword}");
+                    dgvCategories.DataSource = result;
+                }
             }
             catch (Exception ex)
             {
